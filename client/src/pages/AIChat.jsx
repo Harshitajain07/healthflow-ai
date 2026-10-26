@@ -8,40 +8,54 @@ function AIChat() {
 
   // Logged-in user
   const user = JSON.parse(localStorage.getItem("user"));
-  const patientId = user?._id;
+
+  // IMPORTANT:
+  // Our login system stores the user ID as "id"
+  const patientId = user?.id;
 
   useEffect(() => {
     loadChatHistory();
   }, []);
 
-  // Load previous chats
+  // ============================
+  // Load Previous Chats
+  // ============================
   const loadChatHistory = async () => {
-    if (!patientId) return;
+    if (!patientId) {
+      console.log("Patient ID not found");
+      return;
+    }
 
     try {
       const response = await axios.get(
         `http://localhost:5000/api/chat/history/${patientId}`
       );
 
-      const formattedChats = response.data.chats.map((chat) => ({
-        role: chat.role,
-        text: chat.message,
-      }));
+      if (response.data.success) {
+        const formattedChats = response.data.chats.map((chat) => ({
+          role: chat.role,
+          text: chat.message,
+        }));
 
-      setMessages(formattedChats);
+        setMessages(formattedChats);
+      }
     } catch (error) {
-      console.error(error);
+      console.error("Error loading chat history:", error);
     }
   };
 
+  // ============================
   // Send Message
+  // ============================
   const sendMessage = async () => {
     if (!patientId) {
       alert("Please login again.");
       return;
     }
 
-    if (!message.trim()) return;
+    if (!message.trim()) {
+      return;
+    }
 
     const userMessage = {
       role: "user",
@@ -51,6 +65,7 @@ function AIChat() {
     setMessages((prev) => [...prev, userMessage]);
 
     const currentMessage = message;
+
     setMessage("");
 
     try {
@@ -59,7 +74,7 @@ function AIChat() {
       const response = await axios.post(
         "http://localhost:5000/api/chat/send",
         {
-          patientId,
+          patientId: patientId,
           message: currentMessage,
         }
       );
@@ -70,7 +85,10 @@ function AIChat() {
       };
 
       setMessages((prev) => [...prev, aiMessage]);
+
     } catch (error) {
+      console.error("AI Chat Error:", error);
+
       alert(
         error.response?.data?.message ||
           "Failed to contact AI."
@@ -85,7 +103,9 @@ function AIChat() {
 
       <div className="max-w-5xl mx-auto bg-white rounded-xl shadow-xl">
 
+        {/* Header */}
         <div className="bg-blue-600 text-white p-5 rounded-t-xl">
+
           <h1 className="text-3xl font-bold">
             🤖 HealthFlow AI Assistant
           </h1>
@@ -94,15 +114,21 @@ function AIChat() {
             Ask health-related questions, understand your reports,
             prescriptions, and get AI-powered guidance.
           </p>
+
         </div>
 
+        {/* Chat Messages */}
         <div className="h-[500px] overflow-y-auto p-6 space-y-4">
 
           {messages.length === 0 && (
             <div className="text-center text-gray-500 mt-20">
+
               👋 Welcome!
+
               <br />
+
               Start chatting with HealthFlow AI.
+
             </div>
           )}
 
@@ -127,6 +153,7 @@ function AIChat() {
 
         </div>
 
+        {/* Message Input */}
         <div className="border-t p-5 flex gap-3">
 
           <input

@@ -7,6 +7,7 @@ const {
   registerUser,
   loginUser,
   getUserStats,
+  changePassword,
 } = require("../controllers/authController");
 
 // ============================
@@ -23,7 +24,7 @@ router.post("/login", loginUser);
 // User Statistics
 // ============================
 router.get("/stats", getUserStats);
-
+router.put("/change-password", changePassword);
 // ============================
 // Test Route
 // ============================

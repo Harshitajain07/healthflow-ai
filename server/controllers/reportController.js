@@ -4,7 +4,11 @@ const { extractPDFText } = require("../services/pdfService");
 const { analyzeMedicalReport } = require("../services/geminiService");
 
 const MedicalReport = require("../models/MedicalReport");
+const User = require("../models/User");
 
+// ============================
+// Summarize Medical Report
+// ============================
 const summarizeReport = async (req, res) => {
   try {
     if (!req.file) {
@@ -23,31 +27,38 @@ const summarizeReport = async (req, res) => {
     // Analyze with Gemini
     const summary = await analyzeMedicalReport(reportText);
 
-    const User = require("../models/User");
+    // Get patient ID from frontend
+    const patientId = req.body.patient;
 
-  const patient = await User.findOne({ role: "patient" });
+    if (!patientId) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient information not found.",
+      });
+    }
 
-  if (!patient) {
-  return res.status(404).json({
-    success: false,
-    message: "No patient found.",
-  });
-}
+    // Check patient exists
+    const patient = await User.findById(patientId);
 
-    const patientId = patient._id;
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient not found.",
+      });
+    }
 
-    console.log("req.body =", req.body);
     console.log("patientId =", patientId);
     console.log("req.file =", req.file);
 
+    // Save report
     await MedicalReport.create({
-        patient: patientId,
-        fileName: req.file.originalname,
-        extractedText: reportText,
-        aiSummary: summary,
+      patient: patientId,
+      fileName: req.file.originalname,
+      extractedText: reportText,
+      aiSummary: summary,
     });
 
-    // Delete uploaded file after processing
+    // Delete uploaded file
     fs.unlinkSync(filePath);
 
     res.json({
@@ -65,6 +76,31 @@ const summarizeReport = async (req, res) => {
   }
 };
 
+// ============================
+// Get Patient Reports
+// ============================
+const getPatientReports = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    const reports = await MedicalReport.find({
+      patient: patientId,
+    }).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      reports,
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   summarizeReport,
+  getPatientReports,
 };

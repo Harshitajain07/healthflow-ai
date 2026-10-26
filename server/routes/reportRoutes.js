@@ -4,6 +4,7 @@ const multer = require("multer");
 
 const {
   summarizeReport,
+  getPatientReports,
 } = require("../controllers/reportController");
 
 const upload = multer({
@@ -15,5 +16,8 @@ router.post(
   upload.single("report"),
   summarizeReport
 );
+
+// Get reports for a patient
+router.get("/patient/:patientId", getPatientReports);
 
 module.exports = router;

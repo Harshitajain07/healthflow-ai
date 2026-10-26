@@ -1,200 +1,308 @@
-import { Link } from "react-router-dom";
-import {
-  FaHome,
-  FaCalendarAlt,
-  FaClipboardList,
-  FaRobot,
-  FaPrescriptionBottleAlt,
-  FaFileMedical,
-  FaComments,
-  FaSignOutAlt,
-  FaHospital,
-  FaUserCircle,
-  FaBell,
-} from "react-icons/fa";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import axios from "axios";
 
 function PatientDashboard() {
-  const user = JSON.parse(localStorage.getItem("user"));
+  const navigate = useNavigate();
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
+  const [user, setUser] = useState(null);
+  const [doctors, setDoctors] = useState(0);
+  const [appointments, setAppointments] = useState(0);
+  const [reports, setReports] = useState(0);
 
-    if (hour < 12) return "Good Morning";
-    if (hour < 17) return "Good Afternoon";
-    return "Good Evening";
-  };
+  // Load logged-in user
+  useEffect(() => {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem("user"));
 
-  const today = new Date();
+      if (savedUser) {
+        setUser(savedUser);
+      }
+    } catch (error) {
+      console.error("Error reading user:", error);
+    }
+  }, []);
 
-  const currentDate = today.toLocaleDateString("en-IN", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  // Get dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        // Get doctors
+        const doctorResponse = await axios.get(
+          "http://localhost:5000/api/doctors"
+        );
 
+        if (doctorResponse.data.success) {
+          setDoctors(doctorResponse.data.doctors.length);
+        }
+
+        // Get appointments
+        const appointmentResponse = await axios.get(
+          "http://localhost:5000/api/appointments"
+        );
+
+        if (appointmentResponse.data.success) {
+          const myAppointments =
+            appointmentResponse.data.appointments.filter(
+              (appointment) =>
+                appointment.patient?._id === user.id
+            );
+
+          setAppointments(myAppointments.length);
+        }
+
+        // Get medical reports
+        const reportResponse = await axios.get(
+          `http://localhost:5000/api/reports/patient/${user.id}`
+        );
+
+        if (reportResponse.data.success) {
+          setReports(reportResponse.data.reports.length);
+        }
+      } catch (error) {
+        console.error("Dashboard Error:", error);
+      }
+    };
+
+    if (user?.id) {
+      fetchDashboardData();
+    }
+  }, [user]);
+
+  // Logout
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
-    window.location.href = "/login";
+
+    navigate("/login");
   };
 
+  // Current date
+  const currentDate = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  // User not found
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-blue-50 flex items-center justify-center">
+        <div className="bg-white p-8 rounded-2xl shadow-lg text-center">
+          <h1 className="text-2xl font-bold text-red-600">
+            User information not found
+          </h1>
+
+          <p className="text-gray-500 mt-2">
+            Please login again.
+          </p>
+
+          <Link
+            to="/login"
+            className="inline-block mt-5 bg-blue-600 text-white px-6 py-3 rounded-xl"
+          >
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 flex">
 
-      {/* ================= SIDEBAR ================= */}
+      {/* Sidebar */}
+      <aside className="w-64 bg-white shadow-lg hidden md:flex flex-col">
 
-      <div className="w-72 bg-gradient-to-b from-blue-800 to-blue-600 text-white flex flex-col justify-between shadow-xl">
+        {/* Logo */}
+        <div className="p-6 border-b">
+          <h1 className="text-2xl font-bold text-blue-700">
+            🏥 HealthFlow AI
+          </h1>
 
-        <div>
+          <p className="text-sm text-gray-500 mt-1">
+            Patient Portal
+          </p>
+        </div>
 
-          <div className="p-6 border-b border-blue-500">
+        {/* Navigation */}
+        <nav className="flex-1 p-4">
 
-            <div className="flex items-center gap-3">
+          <Link
+            to="/patient"
+            className="flex items-center gap-3 p-3 rounded-xl bg-blue-100 text-blue-700 font-semibold"
+          >
+            🏠 Dashboard
+          </Link>
 
-              <FaHospital size={35} />
+          <Link
+            to="/book-appointment"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            📅 Book Appointment
+          </Link>
+
+          <Link
+            to="/my-appointments"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            📋 My Appointments
+          </Link>
+
+          <Link
+            to="/symptom-checker"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            🩺 AI Symptom Checker
+          </Link>
+
+          <Link
+            to="/prescription-reader"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            💊 AI Prescription Reader
+          </Link>
+
+          <Link
+            to="/report-summarizer"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            📄 AI Report Summarizer
+          </Link>
+
+          <Link
+            to="/ai-chat"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            🤖 AI Health Chat
+          </Link>
+
+          {/* My Profile */}
+          <Link
+            to="/my-profile"
+            className="flex items-center gap-3 p-3 mt-2 rounded-xl hover:bg-blue-50"
+          >
+            👤 My Profile
+          </Link>
+
+        </nav>
+
+        {/* Logout */}
+        <div className="p-4 border-t">
+          <button
+            onClick={handleLogout}
+            className="w-full bg-red-50 text-red-600 py-3 rounded-xl font-semibold hover:bg-red-100"
+          >
+            🚪 Logout
+          </button>
+        </div>
+
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 p-6 md:p-10">
+
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
+          <div>
+            <h2 className="text-3xl font-bold text-gray-800">
+              Good Day, {user.fullName} 👋
+            </h2>
+
+            <p className="text-gray-500 mt-1">
+              {currentDate}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
+
+            <div className="text-right hidden sm:block">
+              <p className="font-semibold text-gray-800">
+                {user.email}
+              </p>
+
+              <p className="text-sm text-blue-600 capitalize">
+                {user.role}
+              </p>
+            </div>
+
+            <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center text-xl font-bold">
+              {user.fullName?.charAt(0).toUpperCase()}
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-8">
+
+          {/* Appointments */}
+          <div className="bg-white rounded-2xl shadow p-6 hover:shadow-lg transition">
+
+            <div className="flex items-center justify-between">
 
               <div>
-
-                <h1 className="text-2xl font-bold">
-                  HealthFlow AI
-                </h1>
-
-                <p className="text-blue-100 text-sm">
-                  Smart Healthcare Platform
+                <p className="text-gray-500">
+                  My Appointments
                 </p>
 
+                <h3 className="text-4xl font-bold text-blue-600 mt-2">
+                  {appointments}
+                </h3>
+              </div>
+
+              <div className="text-4xl">
+                📅
               </div>
 
             </div>
 
           </div>
 
-          <div className="p-4 space-y-2 mt-5">
+          {/* Doctors */}
+          <div className="bg-white rounded-2xl shadow p-6 hover:shadow-lg transition">
 
-            <Link
-              to="/patient"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaHome />
-              Dashboard
-            </Link>
+            <div className="flex items-center justify-between">
 
-            <Link
-              to="/book-appointment"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaCalendarAlt />
-              Book Appointment
-            </Link>
+              <div>
+                <p className="text-gray-500">
+                  Available Doctors
+                </p>
 
-            <Link
-              to="/my-appointments"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaClipboardList />
-              My Appointments
-            </Link>
+                <h3 className="text-4xl font-bold text-green-600 mt-2">
+                  {doctors}
+                </h3>
+              </div>
 
-            <Link
-              to="/symptom-checker"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaRobot />
-              AI Symptom Checker
-            </Link>
+              <div className="text-4xl">
+                👨‍⚕️
+              </div>
 
-            <Link
-              to="/prescription-reader"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaPrescriptionBottleAlt />
-              AI Prescription Reader
-            </Link>
-
-            <Link
-              to="/report-summarizer"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaFileMedical />
-              AI Report Summarizer
-            </Link>
-
-            <Link
-              to="/ai-chat"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaComments />
-              AI Health Chat
-            </Link>
-
-            <Link
-              to="#"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white hover:text-blue-700 transition"
-            >
-              <FaUserCircle />
-              My Profile
-            </Link>
+            </div>
 
           </div>
 
-        </div>
+          {/* Medical Reports */}
+          <div className="bg-white rounded-2xl shadow p-6 hover:shadow-lg transition">
 
-        <div className="p-5">
+            <div className="flex items-center justify-between">
 
-          <button
-            onClick={handleLogout}
-            className="w-full bg-red-500 hover:bg-red-600 py-3 rounded-xl font-semibold flex justify-center items-center gap-3"
-          >
-            <FaSignOutAlt />
-            Logout
-          </button>
+              <div>
+                <p className="text-gray-500">
+                  Medical Reports
+                </p>
 
-        </div>
+                <h3 className="text-4xl font-bold text-purple-600 mt-2">
+                  {reports}
+                </h3>
+              </div>
 
-      </div>
-
-      {/* ================= MAIN CONTENT ================= */}
-
-      <div className="flex-1 p-8">
-
-        {/* Header */}
-
-        <div className="bg-white rounded-2xl shadow-lg p-8 flex justify-between items-center">
-
-          <div>
-
-            <h1 className="text-4xl font-bold text-gray-800">
-              {getGreeting()}, {user?.fullName} 👋
-            </h1>
-
-            <p className="text-gray-500 mt-2">
-              Welcome back to HealthFlow AI
-            </p>
-
-            <p className="text-gray-400 mt-2">
-              {currentDate}
-            </p>
-
-            <p className="mt-3 font-medium">
-              📧 {user?.email}
-            </p>
-
-            <p>
-              👤 {user?.role}
-            </p>
-
-          </div>
-
-          <div className="flex items-center gap-5">
-
-            <button className="text-2xl hover:scale-110 transition">
-              <FaBell />
-            </button>
-
-            <div className="w-16 h-16 rounded-full bg-blue-600 text-white flex justify-center items-center text-3xl font-bold">
-
-              {user?.fullName?.charAt(0).toUpperCase()}
+              <div className="text-4xl">
+                📄
+              </div>
 
             </div>
 
@@ -202,188 +310,128 @@ function PatientDashboard() {
 
         </div>
 
-        {/* Cards */}
+        {/* Quick Actions */}
+        <div className="mt-10">
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+          <h2 className="text-2xl font-bold text-gray-800">
+            Quick Actions
+          </h2>
 
-          <div className="bg-white rounded-2xl shadow p-6">
-            <h2 className="text-xl font-semibold">
-              📅 Appointments
-            </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-5">
 
-            <p className="text-4xl text-blue-600 font-bold mt-3">
-              0
-            </p>
+            <Link
+              to="/book-appointment"
+              className="bg-blue-600 text-white p-6 rounded-2xl shadow hover:scale-105 transition"
+            >
+              <div className="text-4xl">
+                📅
+              </div>
 
-          </div>
+              <h3 className="text-xl font-bold mt-4">
+                Book Appointment
+              </h3>
 
-          <div className="bg-white rounded-2xl shadow p-6">
-            <h2 className="text-xl font-semibold">
-              👨‍⚕️ Doctors
-            </h2>
+              <p className="mt-2 text-blue-100">
+                Schedule an appointment with a doctor.
+              </p>
+            </Link>
 
-            <p className="text-4xl text-green-600 font-bold mt-3">
-              0
-            </p>
+            <Link
+              to="/my-appointments"
+              className="bg-green-600 text-white p-6 rounded-2xl shadow hover:scale-105 transition"
+            >
+              <div className="text-4xl">
+                📋
+              </div>
 
-          </div>
+              <h3 className="text-xl font-bold mt-4">
+                My Appointments
+              </h3>
 
-          <div className="bg-white rounded-2xl shadow p-6">
-            <h2 className="text-xl font-semibold">
-              📄 Reports
-            </h2>
+              <p className="mt-2 text-green-100">
+                View and manage your appointments.
+              </p>
+            </Link>
 
-            <p className="text-4xl text-red-600 font-bold mt-3">
-              0
-            </p>
+            <Link
+              to="/symptom-checker"
+              className="bg-purple-600 text-white p-6 rounded-2xl shadow hover:scale-105 transition"
+            >
+              <div className="text-4xl">
+                🩺
+              </div>
+
+              <h3 className="text-xl font-bold mt-4">
+                AI Symptom Checker
+              </h3>
+
+              <p className="mt-2 text-purple-100">
+                Get AI-powered health guidance.
+              </p>
+            </Link>
 
           </div>
 
         </div>
 
-
-        {/* Quick Actions */}
-
-<div className="mt-10">
-
-  <h2 className="text-3xl font-bold mb-6">
-    ⚡ Quick Actions
-  </h2>
-
-  <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-
-    <Link
-      to="/book-appointment"
-      className="bg-blue-600 text-white p-6 rounded-2xl shadow-lg hover:scale-105 transition-all duration-300"
-    >
-      <div className="text-5xl mb-3">📅</div>
-
-      <h3 className="font-bold text-lg">
-        Book Appointment
-      </h3>
-
-      <p className="text-blue-100 mt-2 text-sm">
-        Schedule a doctor visit
-      </p>
-
-    </Link>
-
-    <Link
-      to="/ai-chat"
-      className="bg-green-600 text-white p-6 rounded-2xl shadow-lg hover:scale-105 transition-all duration-300"
-    >
-      <div className="text-5xl mb-3">🤖</div>
-
-      <h3 className="font-bold text-lg">
-        AI Health Chat
-      </h3>
-
-      <p className="text-green-100 mt-2 text-sm">
-        Ask health questions
-      </p>
-
-    </Link>
-
-    <Link
-      to="/report-summarizer"
-      className="bg-purple-600 text-white p-6 rounded-2xl shadow-lg hover:scale-105 transition-all duration-300"
-    >
-      <div className="text-5xl mb-3">📄</div>
-
-      <h3 className="font-bold text-lg">
-        Report AI
-      </h3>
-
-      <p className="text-purple-100 mt-2 text-sm">
-        Analyze medical reports
-      </p>
-
-    </Link>
-
-    <Link
-      to="/prescription-reader"
-      className="bg-orange-500 text-white p-6 rounded-2xl shadow-lg hover:scale-105 transition-all duration-300"
-    >
-      <div className="text-5xl mb-3">💊</div>
-
-      <h3 className="font-bold text-lg">
-        Prescription AI
-      </h3>
-
-      <p className="text-orange-100 mt-2 text-sm">
-        Read prescriptions
-      </p>
-
-    </Link>
-
-  </div>
-
-</div>
-
         {/* AI Services */}
-
         <div className="mt-10">
 
-          <h2 className="text-3xl font-bold mb-5">
-            🤖 AI Services
+          <h2 className="text-2xl font-bold text-gray-800">
+            AI Health Services
           </h2>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
-
-            <Link
-              to="/symptom-checker"
-              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl hover:-translate-y-1 transition"
-            >
-              <h3 className="font-bold text-xl">
-                🤖 Symptom Checker
-              </h3>
-
-              <p className="text-gray-500 mt-2">
-                Check symptoms instantly.
-              </p>
-
-            </Link>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-5">
 
             <Link
               to="/prescription-reader"
-              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl hover:-translate-y-1 transition"
+              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl transition"
             >
-              <h3 className="font-bold text-xl">
-                💊 Prescription Reader
+              <div className="text-4xl">
+                💊
+              </div>
+
+              <h3 className="text-xl font-bold mt-4">
+                Prescription Reader
               </h3>
 
               <p className="text-gray-500 mt-2">
-                Analyze handwritten prescriptions.
+                Upload prescriptions and get AI analysis.
               </p>
-
             </Link>
 
             <Link
               to="/report-summarizer"
-              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl hover:-translate-y-1 transition"
+              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl transition"
             >
-              <h3 className="font-bold text-xl">
-                📄 Report Summarizer
+              <div className="text-4xl">
+                📄
+              </div>
+
+              <h3 className="text-xl font-bold mt-4">
+                Report Summarizer
               </h3>
 
               <p className="text-gray-500 mt-2">
-                Understand reports in seconds.
+                Understand medical reports using AI.
               </p>
-
             </Link>
 
             <Link
               to="/ai-chat"
-              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl hover:-translate-y-1 transition"
+              className="bg-white p-6 rounded-2xl shadow hover:shadow-xl transition"
             >
-              <h3 className="font-bold text-xl">
-                💬 AI Health Chat
+              <div className="text-4xl">
+                🤖
+              </div>
+
+              <h3 className="text-xl font-bold mt-4">
+                AI Health Chat
               </h3>
 
               <p className="text-gray-500 mt-2">
-                Chat with your AI assistant.
+                Ask questions about your health.
               </p>
-
             </Link>
 
           </div>
@@ -391,21 +439,20 @@ function PatientDashboard() {
         </div>
 
         {/* Health Tip */}
+        <div className="mt-10 bg-blue-600 text-white p-6 rounded-2xl shadow-lg">
 
-        <div className="mt-10 bg-green-500 text-white rounded-2xl p-8 shadow">
-
-          <h2 className="text-2xl font-bold">
+          <h2 className="text-xl font-bold">
             💡 Today's Health Tip
           </h2>
 
-          <p className="mt-3 text-lg">
-            Drink 2-3 litres of water, exercise for 30 minutes,
-            sleep 7-8 hours, and eat plenty of fruits and vegetables.
+          <p className="mt-2 text-blue-100">
+            Stay hydrated, eat a balanced diet, exercise regularly,
+            and make time for proper sleep.
           </p>
 
         </div>
 
-      </div>
+      </main>
 
     </div>
   );
