@@ -1,3 +1,4 @@
+
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import Hero from "../components/Hero";
@@ -8,18 +9,21 @@ import AIAssistant from "../components/AIAssistant";
 
 function Home() {
   return (
-    <div className="bg-white min-h-screen">
-      <div className="max-w-7xl mx-auto px-8">
+    <div className="min-h-screen bg-white">
+      <div className="mx-auto max-w-7xl px-8">
         <Navbar />
-        <Hero />
-        <Features />
-        <Doctors />
-        <Stats />
-        <AIAssistant />
-        <Footer />
+        <main>
+          <Hero />
+          <Features />
+          <Doctors />
+          <Stats />
+          <AIAssistant />
+        </main>
       </div>
+      <Footer />
     </div>
   );
 }
 
 export default Home;
+
