@@ -1,4 +1,5 @@
-console.log("✅ authRoutes.js loaded");
+
+console.log("authRoutes.js loaded");
 
 const express = require("express");
 const router = express.Router();
@@ -10,27 +11,35 @@ const {
   changePassword,
 } = require("../controllers/authController");
 
-// ============================
-// Register
-// ============================
-router.post("/register", registerUser);
+const {
+  protect,
+  authorizeRoles,
+} = require("../middleware/authMiddleware");
 
-// ============================
-// Login
-// ============================
+// Public routes
+router.post("/register", registerUser);
 router.post("/login", loginUser);
 
-// ============================
-// User Statistics
-// ============================
-router.get("/stats", getUserStats);
-router.put("/change-password", changePassword);
-// ============================
-// Test Route
-// ============================
+// Statistics — admin only
+router.get(
+  "/stats",
+  protect,
+  authorizeRoles("admin"),
+  getUserStats
+);
+
+// Change password — authenticated users
+router.put(
+  "/change-password",
+  protect,
+  authorizeRoles("patient", "doctor", "admin"),
+  changePassword
+);
+
+// Test route
 router.get("/test", (req, res) => {
   res.json({
-    message: "Auth Routes Working ✅",
+    message: "Auth Routes Working",
   });
 });
 

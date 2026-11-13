@@ -1,11 +1,10 @@
 
 const Appointment = require("../models/Appointment");
+const User = require("../models/User");
 
-
- 
- // ============================
- // Book Appointment - Protected
- // ============================
+// ============================
+// Book Appointment
+// ============================
 const bookAppointment = async (req, res) => {
   try {
     const {
@@ -15,14 +14,29 @@ const bookAppointment = async (req, res) => {
       reason,
     } = req.body;
 
-    // Always use the logged-in user's ID.
-    // Never trust a patient ID supplied by the frontend.
     const patient = req.user.id;
 
-    if (!doctor || !appointmentDate || !appointmentTime || !reason?.trim()) {
+    if (
+      !doctor ||
+      !appointmentDate ||
+      !appointmentTime ||
+      !reason?.trim()
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Please provide the doctor, date, time, and reason.",
+        message: "Please provide all appointment details.",
+      });
+    }
+
+    const doctorExists = await User.findOne({
+      _id: doctor,
+      role: "doctor",
+    });
+
+    if (!doctorExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Selected doctor was not found.",
       });
     }
 
@@ -38,7 +52,7 @@ const bookAppointment = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Appointment Booked Successfully ✅",
+      message: "Appointment booked successfully.",
       appointment: newAppointment,
     });
   } catch (error) {
@@ -46,32 +60,40 @@ const bookAppointment = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Error booking appointment",
-      error: error.message,
+      message: "Unable to book appointment.",
     });
   }
 };
 
-
-
 // ============================
-// Get All Appointments
+// Get Appointments
 // ============================
 const getAppointments = async (req, res) => {
   try {
-    const appointments = await Appointment.find()
+    let filter = {};
+
+    if (req.user.role === "patient") {
+      filter.patient = req.user.id;
+    } else if (req.user.role === "doctor") {
+      filter.doctor = req.user.id;
+    }
+
+    // Admins can see all appointments.
+    const appointments = await Appointment.find(filter)
       .populate("patient", "fullName email")
-      .populate("doctor", "fullName email");
+      .populate("doctor", "fullName email")
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       appointments,
     });
   } catch (error) {
+    console.error("Get Appointments Error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Error fetching appointments",
-      error: error.message,
+      message: "Unable to fetch appointments.",
     });
   }
 };
@@ -81,70 +103,51 @@ const getAppointments = async (req, res) => {
 // ============================
 const cancelAppointment = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const appointment = await Appointment.findById(id);
+    const appointment = await Appointment.findById(req.params.id);
 
     if (!appointment) {
       return res.status(404).json({
         success: false,
-        message: "Appointment not found",
+        message: "Appointment not found.",
       });
     }
-
-    // ============================
-    // Ownership Protection
-    // ============================
 
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    // Patient can cancel only their own appointment
     if (
       userRole === "patient" &&
       appointment.patient.toString() !== userId
     ) {
       return res.status(403).json({
         success: false,
-        message: "You can only cancel your own appointments.",
+        message: "You cannot cancel another patient's appointment.",
       });
     }
 
-    // Doctor can cancel only appointments assigned to them
     if (
       userRole === "doctor" &&
       appointment.doctor.toString() !== userId
     ) {
       return res.status(403).json({
         success: false,
-        message: "You can only cancel your own assigned appointments.",
+        message: "You cannot cancel this appointment.",
       });
     }
 
-    // Only patients and doctors can cancel
-    if (!["patient", "doctor"].includes(userRole)) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not allowed to cancel appointments.",
-      });
-    }
-
-    // Prevent cancelling an already cancelled appointment
     if (appointment.status === "Cancelled") {
       return res.status(400).json({
         success: false,
-        message: "This appointment is already cancelled.",
+        message: "Appointment is already cancelled.",
       });
     }
 
-    // Cancel appointment
     appointment.status = "Cancelled";
-
     await appointment.save();
 
     res.status(200).json({
       success: true,
-      message: "Appointment Cancelled Successfully ✅",
+      message: "Appointment cancelled successfully.",
       appointment,
     });
   } catch (error) {
@@ -152,20 +155,19 @@ const cancelAppointment = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to cancel appointment.",
     });
   }
 };
 
 // ============================
 // Update Appointment Status
+// Doctors only
 // ============================
 const updateAppointmentStatus = async (req, res) => {
   try {
-    const { id } = req.params;
     const { status } = req.body;
 
-    // Allowed appointment statuses
     const allowedStatuses = [
       "Pending",
       "Approved",
@@ -173,7 +175,6 @@ const updateAppointmentStatus = async (req, res) => {
       "Cancelled",
     ];
 
-    // Validate status
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -181,31 +182,28 @@ const updateAppointmentStatus = async (req, res) => {
       });
     }
 
-    const appointment = await Appointment.findById(id);
+    const appointment = await Appointment.findById(req.params.id);
 
     if (!appointment) {
       return res.status(404).json({
         success: false,
-        message: "Appointment not found",
+        message: "Appointment not found.",
       });
     }
 
-    // Doctor ownership protection
     if (appointment.doctor.toString() !== req.user.id) {
       return res.status(403).json({
         success: false,
-        message: "You can only manage your own appointments.",
+        message: "You cannot update this appointment.",
       });
     }
 
-    // Update status
     appointment.status = status;
-
     await appointment.save();
 
     res.status(200).json({
       success: true,
-      message: `Appointment ${status} Successfully ✅`,
+      message: "Appointment status updated successfully.",
       appointment,
     });
   } catch (error) {
@@ -213,112 +211,46 @@ const updateAppointmentStatus = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: error.message,
-    });
-  }
-};
-
-// ============================
-// Pay Appointment
-// ============================
-const payAppointment = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const appointment = await Appointment.findById(id);
-
-    // Patient ownership protection
-    if (appointment.patient.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: "You can only pay for your own appointments.",
-      });
-    }
-
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: "Appointment not found",
-      });
-    }
-
-    // Only approved appointments can be paid
-    if (appointment.status !== "Approved") {
-      return res.status(400).json({
-        success: false,
-        message: "Only approved appointments can be paid for.",
-      });
-    }
-
-    // Prevent duplicate payment
-    if (appointment.paymentStatus === "Paid") {
-      return res.status(400).json({
-        success: false,
-        message: "This appointment has already been paid.",
-      });
-    }
-
-    // Mark payment as successful
-    appointment.paymentStatus = "Paid";
-
-    // Consultation fee
-    appointment.paymentAmount = appointment.fee || 500;
-
-    await appointment.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Payment successful ✅",
-      appointment,
-    });
-  } catch (error) {
-    console.error("Payment Error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Payment failed",
-      error: error.message,
+      message: "Unable to update appointment status.",
     });
   }
 };
 
 // ============================
 // Appointment Statistics
+// Doctors can see their own statistics
 // ============================
 const getAppointmentStats = async (req, res) => {
   try {
-    const { doctorId } = req.query;
+    const doctorId = req.user.id;
 
-    if (!doctorId) {
-      return res.status(400).json({
-        success: false,
-        message: "Doctor ID is required",
-      });
-    }
+    const filter = { doctor: doctorId };
 
-    const total = await Appointment.countDocuments({
-      doctor: doctorId,
-    });
-
-    const pending = await Appointment.countDocuments({
-      doctor: doctorId,
-      status: "Pending",
-    });
-
-    const approved = await Appointment.countDocuments({
-      doctor: doctorId,
-      status: "Approved",
-    });
-
-    const rejected = await Appointment.countDocuments({
-      doctor: doctorId,
-      status: "Rejected",
-    });
-
-    const cancelled = await Appointment.countDocuments({
-      doctor: doctorId,
-      status: "Cancelled",
-    });
+    const [
+      total,
+      pending,
+      approved,
+      rejected,
+      cancelled,
+    ] = await Promise.all([
+      Appointment.countDocuments(filter),
+      Appointment.countDocuments({
+        ...filter,
+        status: "Pending",
+      }),
+      Appointment.countDocuments({
+        ...filter,
+        status: "Approved",
+      }),
+      Appointment.countDocuments({
+        ...filter,
+        status: "Rejected",
+      }),
+      Appointment.countDocuments({
+        ...filter,
+        status: "Cancelled",
+      }),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -329,18 +261,72 @@ const getAppointmentStats = async (req, res) => {
       cancelled,
     });
   } catch (error) {
-    console.error("Appointment Stats Error:", error);
+    console.error("Get Appointment Stats Error:", error);
 
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Unable to retrieve appointment statistics.",
     });
   }
 };
 
 // ============================
-// Export Functions
+// Pay Appointment
+// Demo payment marking only
 // ============================
+const payAppointment = async (req, res) => {
+  try {
+    const appointment = await Appointment.findById(req.params.id);
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found.",
+      });
+    }
+
+    if (appointment.patient.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot pay for another patient's appointment.",
+      });
+    }
+
+    if (appointment.status !== "Approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Only approved appointments can be paid for.",
+      });
+    }
+
+    if (appointment.paymentStatus === "Paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment has already been paid for.",
+      });
+    }
+
+    appointment.paymentStatus = "Paid";
+    appointment.paymentAmount = appointment.fee || 500;
+
+    await appointment.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Demo payment marked as successful.",
+      appointment,
+      amount: appointment.paymentAmount,
+    });
+  } catch (error) {
+    console.error("Pay Appointment Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to process payment.",
+    });
+  }
+};
+
 module.exports = {
   bookAppointment,
   getAppointments,
@@ -349,3 +335,4 @@ module.exports = {
   getAppointmentStats,
   payAppointment,
 };
+

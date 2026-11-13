@@ -1,4 +1,5 @@
-console.log("✅ appointmentRoutes Loaded");
+
+console.log("appointmentRoutes loaded");
 
 const express = require("express");
 const router = express.Router();
@@ -12,7 +13,6 @@ const {
   payAppointment,
 } = require("../controllers/appointmentController");
 
-// Authentication middleware
 const {
   protect,
   authorizeRoles,
@@ -20,10 +20,10 @@ const {
 
 // Test route
 router.get("/test", (req, res) =>
-  res.json({ message: "Appointment Route Working ✅" })
+  res.json({ message: "Appointment Route Working" })
 );
 
-// Book appointment
+// Book appointment — patients only
 router.post(
   "/book",
   protect,
@@ -31,10 +31,23 @@ router.post(
   bookAppointment
 );
 
-// Get appointments
-router.get("/", getAppointments);
+// Get appointments — authenticated users
+router.get(
+  "/",
+  protect,
+  authorizeRoles("patient", "doctor", "admin"),
+  getAppointments
+);
 
-// Cancel appointment
+// Appointment statistics — doctors only
+router.get(
+  "/stats",
+  protect,
+  authorizeRoles("doctor"),
+  getAppointmentStats
+);
+
+// Cancel appointment — patients and doctors
 router.put(
   "/cancel/:id",
   protect,
@@ -42,7 +55,7 @@ router.put(
   cancelAppointment
 );
 
-// Update status - Doctors only
+// Update appointment status — assigned doctor
 router.put(
   "/status/:id",
   protect,
@@ -50,14 +63,12 @@ router.put(
   updateAppointmentStatus
 );
 
-// Appointment statistics
-router.get("/stats", getAppointmentStats);
-
-// Payment
+// Mark appointment as paid — patients only
 router.put(
   "/pay/:id",
   protect,
   authorizeRoles("patient"),
   payAppointment
 );
+
 module.exports = router;

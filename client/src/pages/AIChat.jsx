@@ -12,25 +12,94 @@ const suggestions = [
   "What should I ask my doctor?",
 ];
 
+// Create a short title from the patient's first question.
+function makeChatTitle(text = "") {
+  const cleanText = String(text)
+    .replace(/[#*`_>\n\r]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanText) return "New Conversation";
+
+  const lowerText = cleanText.toLowerCase();
+
+  if (
+    lowerText.includes("healthy lifestyle") ||
+    lowerText.includes("maintain a healthy") ||
+    lowerText.includes("health tips")
+  ) {
+    return "Healthy Lifestyle Tips";
+  }
+
+  if (
+    lowerText.includes("medical report") ||
+    lowerText.includes("understand my report")
+  ) {
+    return "Understanding Medical Reports";
+  }
+
+  if (
+    lowerText.includes("ask my doctor") ||
+    lowerText.includes("ask a doctor")
+  ) {
+    return "Questions for Your Doctor";
+  }
+
+  if (lowerText.includes("symptom")) {
+    return "Understanding Symptoms";
+  }
+
+  if (
+    lowerText.includes("prescription") ||
+    lowerText.includes("medicine")
+  ) {
+    return "Prescription and Medicines";
+  }
+
+  if (
+    lowerText.includes("diet") ||
+    lowerText.includes("nutrition") ||
+    lowerText.includes("food")
+  ) {
+    return "Diet and Nutrition";
+  }
+
+  const words = cleanText.split(" ");
+  const title = words.slice(0, 7).join(" ");
+
+  return title.length > 48
+    ? `${title.slice(0, 45).trim()}...`
+    : title;
+}
+
+// Format AI response text.
 function formatAIResponse(text = "") {
   return String(text)
     .replace(/&#x20;/gi, " ")
     .replace(/&#32;/gi, " ")
     .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
     .replace(/\r\n/g, "\n")
     .trim();
+}
+
+// Get a safe title for the sidebar.
+// Never use an assistant response as the title.
+function getConversationTitle(conversation) {
+  if (conversation?.title?.trim()) {
+    return conversation.title.trim();
+  }
+
+  if (conversation?.firstUserMessage) {
+    return makeChatTitle(conversation.firstUserMessage);
+  }
+
+  return "New Conversation";
 }
 
 function AIChat() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [conversations, setConversations] = useState([]);
-
   const [activeConversationId, setActiveConversationId] = useState(null);
 
   const [loading, setLoading] = useState(false);
@@ -44,11 +113,45 @@ function AIChat() {
 
   const user = JSON.parse(localStorage.getItem("user") || "null");
   const patientId = user?.id;
+  const token = localStorage.getItem("token");
 
-  // ================= LOAD SAVED CONVERSATIONS =================
+  // Authentication configuration.
+  const getAuthConfig = useCallback(() => {
+    if (!token) return null;
 
+    return {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+    };
+  }, [token]);
+
+  // Handle expired login sessions.
+  const handleAuthError = useCallback(
+    (error) => {
+      if (
+        error.response?.status === 401 ||
+        error.response?.status === 403
+      ) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+
+        alert("Your login session has expired. Please log in again.");
+        navigate("/login", { replace: true });
+
+        return true;
+      }
+
+      return false;
+    },
+    [navigate]
+  );
+
+  // Load saved conversations.
   const loadConversations = useCallback(async () => {
-    if (!patientId) {
+    if (!patientId || !token) {
       setConversations([]);
       return;
     }
@@ -57,51 +160,52 @@ function AIChat() {
       const response = await axios.get(
         `${API}/conversations/${patientId}`,
         {
-          headers: {
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
-          params: {
-            refresh: Date.now(),
-          },
+          ...getAuthConfig(),
+          params: { refresh: Date.now() },
         }
       );
 
       if (response.data.success) {
+        console.log("CONVERSATION DATA FROM SERVER:", response.data.conversations);
         setConversations(response.data.conversations || []);
       }
     } catch (error) {
+      if (handleAuthError(error)) return;
+
       console.error(
-        "Error loading saved conversations:",
+        "Error loading conversations:",
         error.response?.data || error.message
       );
     }
-  }, [patientId]);
+  }, [patientId, token, getAuthConfig, handleAuthError]);
 
   useEffect(() => {
+    if (!patientId || !token) {
+      navigate("/login", { replace: true });
+      return;
+    }
+
     loadConversations();
-  }, [loadConversations]);
+  }, [patientId, token, loadConversations, navigate]);
 
-  // ================= AUTO SCROLL =================
-
+  // Automatically scroll to the latest message.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
     });
   }, [messages, loading]);
 
-  // ================= OPEN PREVIOUS CHAT =================
-
+  // Open an existing conversation.
   const openConversation = async (conversation) => {
-    console.log("Opening conversation:", conversation);
+    const selectedConversationId =
+      conversation?.conversationId || conversation?._id;
 
-    if (!conversation?.conversationId) {
+    if (!selectedConversationId) {
       alert("This conversation does not have a valid ID.");
       return;
     }
 
-    if (!patientId) {
-      alert("Please log in again to continue.");
+    if (!patientId || !token) {
       navigate("/login");
       return;
     }
@@ -115,38 +219,33 @@ function AIChat() {
       const response = await axios.get(
         `${API}/history/${patientId}`,
         {
+          ...getAuthConfig(),
           params: {
-            conversationId: conversation.conversationId,
+            conversationId: selectedConversationId,
             refresh: Date.now(),
-          },
-          headers: {
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
           },
         }
       );
 
-      console.log("Conversation history response:", response.data);
-
       if (!response.data.success) {
         throw new Error(
-          response.data.message || "Unable to load this conversation."
+          response.data.message || "Unable to load conversation."
         );
       }
+
+      if (currentRequestId !== requestIdRef.current) return;
 
       const loadedMessages = (response.data.chats || []).map((chat) => ({
         role: chat.role,
         text: chat.message,
       }));
 
-      if (currentRequestId !== requestIdRef.current) return;
-
       setMessages(loadedMessages);
-      setActiveConversationId(conversation.conversationId);
+      setActiveConversationId(selectedConversationId);
       setMessage("");
-
     } catch (error) {
       if (currentRequestId !== requestIdRef.current) return;
+      if (handleAuthError(error)) return;
 
       console.error(
         "Error opening conversation:",
@@ -155,8 +254,8 @@ function AIChat() {
 
       alert(
         error.response?.data?.message ||
-        error.message ||
-        "Unable to open this conversation."
+          error.message ||
+          "Unable to open conversation."
       );
     } finally {
       if (currentRequestId === requestIdRef.current) {
@@ -165,8 +264,7 @@ function AIChat() {
     }
   };
 
-  // ================= START NEW CHAT =================
-
+  // Start a new chat.
   const startNewChat = () => {
     if (loading) return;
 
@@ -179,18 +277,19 @@ function AIChat() {
     setSidebarOpen(false);
   };
 
-  // ================= SEND MESSAGE =================
-
+  // Send a message to HealthFlow AI.
   const sendMessage = async (text = message) => {
     const currentMessage = text.trim();
 
     if (!currentMessage || loading || historyLoading) return;
 
-    if (!patientId) {
+    if (!patientId || !token) {
       alert("Please log in again to use HealthFlow AI.");
       navigate("/login");
       return;
     }
+
+    const currentRequestId = requestIdRef.current;
 
     setMessages((previous) => [
       ...previous,
@@ -205,7 +304,6 @@ function AIChat() {
 
     try {
       const payload = {
-        patientId,
         message: currentMessage,
       };
 
@@ -215,7 +313,8 @@ function AIChat() {
 
       const response = await axios.post(
         `${API}/send`,
-        payload
+        payload,
+        getAuthConfig()
       );
 
       if (!response.data.success) {
@@ -224,8 +323,12 @@ function AIChat() {
         );
       }
 
-      if (response.data.conversationId) {
-        setActiveConversationId(response.data.conversationId);
+      if (currentRequestId !== requestIdRef.current) return;
+
+      const returnedConversationId = response.data.conversationId;
+
+      if (returnedConversationId) {
+        setActiveConversationId(returnedConversationId);
       }
 
       setMessages((previous) => [
@@ -236,25 +339,24 @@ function AIChat() {
         },
       ]);
 
-      // Refresh saved conversation list.
+      // Refresh sidebar after a successful response.
       const listResponse = await axios.get(
         `${API}/conversations/${patientId}`,
         {
-          params: {
-            refresh: Date.now(),
-          },
-          headers: {
-            "Cache-Control": "no-cache",
-            Pragma: "no-cache",
-          },
+          ...getAuthConfig(),
+          params: { refresh: Date.now() },
         }
       );
+
+      if (currentRequestId !== requestIdRef.current) return;
 
       if (listResponse.data.success) {
         setConversations(listResponse.data.conversations || []);
       }
-
     } catch (error) {
+      if (currentRequestId !== requestIdRef.current) return;
+      if (handleAuthError(error)) return;
+
       console.error(
         "AI Chat Error:",
         error.response?.data || error.message
@@ -271,12 +373,13 @@ function AIChat() {
         },
       ]);
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
-  // ================= MESSAGE RENDERING =================
-
+  // Render user messages and formatted AI Markdown responses.
   const renderMessage = (text, isUser) => {
     const formattedText = formatAIResponse(text);
 
@@ -308,9 +411,7 @@ function AIChat() {
               </h3>
             ),
             p: ({ children }) => (
-              <p className="mb-4 leading-7 last:mb-0">
-                {children}
-              </p>
+              <p className="mb-4 leading-7 last:mb-0">{children}</p>
             ),
             ul: ({ children }) => (
               <ul className="mb-5 ml-1 list-disc space-y-2 pl-5 last:mb-0">
@@ -333,9 +434,7 @@ function AIChat() {
               </strong>
             ),
             em: ({ children }) => (
-              <em className="italic text-slate-700">
-                {children}
-              </em>
+              <em className="italic text-slate-700">{children}</em>
             ),
             blockquote: ({ children }) => (
               <blockquote className="my-5 rounded-r-lg border-l-4 border-teal-500 bg-teal-50 px-4 py-3 text-slate-700">
@@ -357,9 +456,7 @@ function AIChat() {
                 {children}
               </a>
             ),
-            hr: () => (
-              <hr className="my-5 border-slate-200" />
-            ),
+            hr: () => <hr className="my-5 border-slate-200" />,
           }}
         >
           {formattedText}
@@ -368,13 +465,10 @@ function AIChat() {
     );
   };
 
-  // ================= MAIN UI =================
-
   return (
     <div className="min-h-screen bg-slate-100 p-2 sm:p-5">
       <div className="mx-auto flex min-h-[90vh] max-w-7xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
 
-        {/* Mobile sidebar backdrop */}
         {sidebarOpen && (
           <button
             type="button"
@@ -384,7 +478,7 @@ function AIChat() {
           />
         )}
 
-        {/* Sidebar */}
+        {/* Previous Chats Sidebar */}
         <aside
           className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-slate-200 bg-slate-950 text-white transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
@@ -422,7 +516,6 @@ function AIChat() {
             </button>
           </div>
 
-          {/* Previous Chats */}
           <div className="flex items-center justify-between px-5 pb-2 pt-5">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400">
               Previous Chats
@@ -445,33 +538,43 @@ function AIChat() {
                 No saved conversations yet.
               </p>
             ) : (
-              conversations.map((conversation) => (
-                <button
-                  key={conversation.conversationId}
-                  type="button"
-                  onClick={() => openConversation(conversation)}
-                  title={conversation.title}
-                  className={`w-full cursor-pointer rounded-xl px-3 py-3 text-left text-sm transition ${
-                    activeConversationId === conversation.conversationId
-                      ? "bg-white/10 text-white ring-1 ring-teal-500/40"
-                      : "text-slate-300 hover:bg-white/5 hover:text-white"
-                  }`}
-                >
-                  <span className="mb-1 block text-teal-400">
-                    ◷
-                  </span>
+              conversations.map((conversation) => {
+                const conversationId =
+                  conversation.conversationId || conversation._id;
 
-                  <span className="block break-words leading-5">
-                    {conversation.title || "Health conversation"}
-                  </span>
+                const title = getConversationTitle(conversation);
 
-                  {conversation.updatedAt && (
-                    <span className="mt-1 block text-xs text-slate-500">
-                      {new Date(conversation.updatedAt).toLocaleDateString()}
+                return (
+                  <button
+                    key={conversationId}
+                    type="button"
+                    onClick={() => openConversation(conversation)}
+                    title={title}
+                    className={`w-full rounded-xl px-3 py-3 text-left text-sm transition ${
+                      activeConversationId === conversationId
+                        ? "bg-white/10 text-white ring-1 ring-teal-500/40"
+                        : "text-slate-300 hover:bg-white/5 hover:text-white"
+                    }`}
+                  >
+                    <span className="mb-1 block text-teal-400">
+                      ◷
                     </span>
-                  )}
-                </button>
-              ))
+
+                    {/* Only the short title is displayed here. */}
+                    <span className="block break-words leading-5">
+                      {title}
+                    </span>
+
+                    {conversation.lastMessageAt && (
+                      <span className="mt-1 block text-xs text-slate-500">
+                        {new Date(
+                          conversation.lastMessageAt
+                        ).toLocaleDateString()}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
             )}
           </div>
 
@@ -480,9 +583,8 @@ function AIChat() {
           </div>
         </aside>
 
-        {/* Main Chat Panel */}
+        {/* Main Chat Area */}
         <section className="flex min-w-0 flex-1 flex-col">
-
           <header className="flex flex-wrap items-center justify-between gap-3 bg-slate-950 px-4 py-5 text-white sm:px-7">
             <div className="flex items-center gap-3">
               <button
@@ -552,7 +654,6 @@ function AIChat() {
                       className="rounded-2xl border border-slate-200 bg-white p-4 text-sm font-medium leading-6 text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {suggestion}
-
                       <span className="mt-2 block text-lg text-teal-700">
                         ↗
                       </span>
@@ -632,7 +733,9 @@ function AIChat() {
 
               <button
                 type="submit"
-                disabled={loading || historyLoading || !message.trim()}
+                disabled={
+                  loading || historyLoading || !message.trim()
+                }
                 className="mb-1 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-teal-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-900 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5"
               >
                 {loading ? "Sending..." : "Send"}

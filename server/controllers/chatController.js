@@ -6,143 +6,143 @@ const { randomUUID } = require("crypto");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Disable browser and intermediary caching for chat API responses.
+// Prevent private chat history from being cached.
 const disableCache = (res) => {
   res.set({
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "Cache-Control": "no-store, no-cache, must-revalidate, private",
     Pragma: "no-cache",
     Expires: "0",
   });
 };
 
-// Validate MongoDB patient IDs.
-const isValidPatientId = (patientId) => {
-  return mongoose.Types.ObjectId.isValid(patientId);
+// Validate the authenticated patient's ID.
+const isValidPatientId = (id) => {
+  return mongoose.Types.ObjectId.isValid(id);
 };
 
-// Retry temporary Gemini failures up to 3 attempts.
+// Retry temporary Gemini API failures.
 const generateWithRetry = async (model, prompt, maxAttempts = 3) => {
+  let lastError;
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await model.generateContent(prompt);
     } catch (error) {
+      lastError = error;
+
       const status = error.status || error.statusCode;
-      const errorText = `${error.message || ""} ${error.statusText || ""}`;
+      const errorMessage = String(error.message || "").toLowerCase();
 
-      const isTemporary =
+      const isTemporaryError =
         [429, 500, 502, 503, 504].includes(status) ||
-        /high demand|temporarily unavailable|overloaded|timeout|timed out/i.test(
-          errorText
-        );
+        errorMessage.includes("timeout") ||
+        errorMessage.includes("overloaded") ||
+        errorMessage.includes("temporarily unavailable");
 
-      if (!isTemporary || attempt === maxAttempts) {
+      if (!isTemporaryError || attempt === maxAttempts) {
         throw error;
       }
 
-      const delay = attempt * 1000;
-
-      console.log(
-        `Gemini temporarily unavailable. Retrying in ${delay / 1000}s...`
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt * 1500)
       );
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
+
+  throw lastError;
 };
 
-// ================= SEND MESSAGE =================
+// Send a message to HealthFlow AI.
 const sendMessage = async (req, res) => {
-  disableCache(res);
-
   try {
-    const { patientId, message } = req.body;
+    disableCache(res);
 
-    if (!patientId || !isValidPatientId(patientId)) {
-      return res.status(400).json({
+    const patientId = req.user?.id;
+    const { message, conversationId } = req.body;
+
+    if (!isValidPatientId(patientId)) {
+      return res.status(401).json({
         success: false,
-        message: "A valid patient ID is required.",
+        message: "Invalid authenticated user.",
       });
     }
 
-    if (typeof message !== "string" || !message.trim()) {
+    if (!message || typeof message !== "string" || !message.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Message cannot be empty.",
+        message: "Please enter a message.",
       });
     }
 
-    const cleanMessage = message.trim();
+    if (message.length > 5000) {
+      return res.status(400).json({
+        success: false,
+        message: "Message is too long. Please keep it under 5000 characters.",
+      });
+    }
 
-    const conversationId =
-      typeof req.body.conversationId === "string" &&
-      req.body.conversationId.trim()
-        ? req.body.conversationId.trim()
-        : randomUUID();
+    const activeConversationId = conversationId || randomUUID();
 
     // Verify that an existing conversation belongs to this patient.
-    const existingConversation = await Chat.findOne({
-      patient: patientId,
-      conversationId,
-    });
-
-    if (req.body.conversationId && !existingConversation) {
-      return res.status(404).json({
-        success: false,
-        message: "Conversation not found.",
+    if (conversationId) {
+      const existingConversation = await Chat.findOne({
+        patient: patientId,
+        conversationId: activeConversationId,
       });
+
+      if (!existingConversation) {
+        return res.status(404).json({
+          success: false,
+          message: "Conversation not found.",
+        });
+      }
     }
 
-    // Load recent messages for Gemini conversation context.
+    // Load previous messages for AI context.
     const previousMessages = await Chat.find({
       patient: patientId,
-      conversationId,
+      conversationId: activeConversationId,
     })
       .sort({ createdAt: -1 })
-      .limit(12)
-      .lean();
+      .limit(12);
 
     previousMessages.reverse();
 
-    const conversationContext = previousMessages
-      .map((chat) => {
-        const speaker = chat.role === "user" ? "Patient" : "HealthFlow AI";
-        return `${speaker}: ${chat.message}`;
-      })
-      .join("\n\n");
-
-    // Save the patient's message.
+    // Save the user's message.
     await Chat.create({
       patient: patientId,
-      conversationId,
+      conversationId: activeConversationId,
       role: "user",
-      message: cleanMessage,
+      message: message.trim(),
     });
+
+    const conversationHistory = previousMessages.map((chat) => {
+      return `${chat.role === "assistant" ? "Assistant" : "User"}: ${chat.message}`;
+    });
+
+    const prompt = `
+You are HealthFlow AI, a helpful healthcare information assistant.
+
+Follow these instructions:
+- Give clear, friendly and easy-to-understand health information.
+- Do not claim to diagnose diseases or replace a qualified doctor.
+- Encourage users to consult a healthcare professional for medical concerns.
+- For emergencies or potentially life-threatening symptoms, advise the user to seek emergency medical care immediately.
+- Do not recommend prescription medicines or specific dosages.
+- Explain medical terms in simple language.
+- Be respectful, careful, and avoid unsupported claims.
+
+Previous conversation:
+${conversationHistory.join("\n")}
+
+User: ${message.trim()}
+
+Assistant:
+`;
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
     });
-
-    const prompt = `
-You are HealthFlow AI, a professional healthcare information assistant.
-
-Conversation so far:
-${conversationContext || "(This is the beginning of the conversation.)"}
-
-Patient's latest message:
-${cleanMessage}
-
-Provide a clear, helpful response using simple language.
-Use headings and bullet points when useful.
-
-Important safety guidelines:
-- Do not claim to diagnose the patient.
-- Do not prescribe medication or recommend changing prescribed treatment.
-- Explain when the patient should consult a qualified healthcare professional.
-- If the patient describes potentially life-threatening symptoms, advise them to seek emergency medical care immediately.
-- Remind the patient that your response is general information, not a medical diagnosis.
-`;
-
-    console.log("Sending request to Gemini...");
 
     const result = await generateWithRetry(model, prompt);
     const reply = result.response.text();
@@ -150,7 +150,7 @@ Important safety guidelines:
     // Save the AI response.
     await Chat.create({
       patient: patientId,
-      conversationId,
+      conversationId: activeConversationId,
       role: "assistant",
       message: reply,
     });
@@ -158,105 +158,84 @@ Important safety guidelines:
     return res.status(200).json({
       success: true,
       reply,
-      conversationId,
+      conversationId: activeConversationId,
     });
   } catch (error) {
-    console.error("Chat controller error:", error);
+    console.error("AI Chat Error:", error);
 
     const status = error.status || error.statusCode;
-    const errorText = `${error.message || ""} ${error.statusText || ""}`;
+    const errorMessage = String(error.message || "").toLowerCase();
 
-    const isTemporary =
+    const isTemporaryError =
       [429, 500, 502, 503, 504].includes(status) ||
-      /high demand|temporarily unavailable|overloaded|timeout|timed out/i.test(
-        errorText
-      );
+      errorMessage.includes("timeout") ||
+      errorMessage.includes("overloaded");
 
-    if (isTemporary) {
-      return res.status(503).json({
-        success: false,
-        message:
-          "The AI assistant is temporarily busy. Please try again in a minute.",
-      });
-    }
-
-    return res.status(500).json({
+    return res.status(isTemporaryError ? 503 : 500).json({
       success: false,
-      message: "We couldn't process your request right now. Please try again.",
+      message: isTemporaryError
+        ? "The AI assistant is temporarily busy. Please try again shortly."
+        : "Unable to process your message right now.",
     });
   }
 };
 
-// ================= CHAT HISTORY =================
+// Get one conversation's messages.
 const getChatHistory = async (req, res) => {
-  disableCache(res);
-
   try {
-    const { patientId } = req.params;
+    disableCache(res);
+
+    const patientId = req.user?.id;
     const { conversationId } = req.query;
 
-    if (!patientId || !isValidPatientId(patientId)) {
-      return res.status(400).json({
+    if (!isValidPatientId(patientId)) {
+      return res.status(401).json({
         success: false,
-        message: "A valid patient ID is required.",
+        message: "Invalid authenticated user.",
       });
     }
 
-    if (!conversationId || typeof conversationId !== "string") {
+    if (!conversationId) {
       return res.status(400).json({
         success: false,
-        message: "A conversation ID is required.",
+        message: "Conversation ID is required.",
       });
     }
 
     const chats = await Chat.find({
       patient: patientId,
       conversationId,
-    })
-      .sort({ createdAt: 1 })
-      .lean();
-
-    if (chats.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No messages found for this conversation.",
-        chats: [],
-      });
-    }
-
-    console.log(
-      `Loaded ${chats.length} messages for conversation ${conversationId}`
-    );
+    }).sort({ createdAt: 1 });
 
     return res.status(200).json({
       success: true,
       chats,
     });
   } catch (error) {
-    console.error("Error loading chat history:", error);
+    console.error("Get Chat History Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to load chat history right now.",
+      message: "Unable to load chat history.",
     });
   }
 };
 
-// ================= SAVED CONVERSATIONS =================
+// Get all conversations with titles based on their first user message.
 const getConversations = async (req, res) => {
-  disableCache(res);
-
   try {
-    const { patientId } = req.params;
+    disableCache(res);
 
-    if (!patientId || !isValidPatientId(patientId)) {
-      return res.status(400).json({
+    const patientId = req.user?.id;
+
+    if (!isValidPatientId(patientId)) {
+      return res.status(401).json({
         success: false,
-        message: "A valid patient ID is required.",
+        message: "Invalid authenticated user.",
       });
     }
 
-    const chats = await Chat.aggregate([
+    const conversations = await Chat.aggregate([
       {
         $match: {
           patient: new mongoose.Types.ObjectId(patientId),
@@ -270,48 +249,59 @@ const getConversations = async (req, res) => {
       {
         $group: {
           _id: "$conversationId",
-          firstMessage: { $first: "$message" },
-          createdAt: { $first: "$createdAt" },
-          updatedAt: { $last: "$createdAt" },
-          messageCount: { $sum: 1 },
+
+          // Use the first user message as the chat title.
+          title: {
+            $first: {
+              $cond: [
+                { $eq: ["$role", "user"] },
+                "$message",
+                null,
+              ],
+            },
+          },
+
+          lastMessage: {
+            $last: "$message",
+          },
+
+          lastMessageAt: {
+            $last: "$createdAt",
+          },
+
+          messageCount: {
+            $sum: 1,
+          },
+        },
+      },
+      {
+        $addFields: {
+          title: {
+            $substrCP: [
+              { $ifNull: ["$title", "New Conversation"] },
+              0,
+              55,
+            ],
+          },
         },
       },
       {
         $sort: {
-          updatedAt: -1,
+          lastMessageAt: -1,
         },
       },
     ]);
-
-    const conversations = chats.map((chat) => {
-      const title = chat.firstMessage || "Health conversation";
-
-      return {
-        conversationId: chat._id,
-        title:
-          title.length > 45
-            ? `${title.slice(0, 45)}...`
-            : title,
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
-        messageCount: chat.messageCount,
-      };
-    });
-
-    console.log(
-      `Loaded ${conversations.length} conversations for patient ${patientId}`
-    );
 
     return res.status(200).json({
       success: true,
       conversations,
     });
   } catch (error) {
-    console.error("Error loading conversations:", error);
+    console.error("Get Conversations Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to load saved conversations right now.",
+      message: "Unable to load conversations.",
     });
   }
 };
@@ -321,3 +311,4 @@ module.exports = {
   getChatHistory,
   getConversations,
 };
+

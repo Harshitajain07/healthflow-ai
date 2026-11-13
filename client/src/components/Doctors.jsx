@@ -12,8 +12,15 @@ function Doctors() {
   useEffect(() => {
     const fetchDoctors = async () => {
       try {
+        const token = localStorage.getItem("token");
+
         const response = await axios.get(
-          "http://localhost:5000/api/doctors"
+          "http://localhost:5000/api/doctors",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
         );
 
         if (response.data.success) {
@@ -210,4 +217,6 @@ function Doctors() {
 }
 
 export default Doctors;
+
+
 
